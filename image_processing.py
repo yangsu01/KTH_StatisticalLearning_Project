@@ -47,7 +47,7 @@ class ImageProcessor:
         padded_img = np.pad(
             img, 
             pad_width = kernel_size // 2,
-            mode = "reflect"
+            mode = "symmetric"
         )
 
         # convolution
@@ -111,7 +111,148 @@ class ImageProcessor:
     def _reshape_img(self, img_arr):
         return img_arr.reshape(self.original_shape, order="F")
 
+    def _forward_haar(self, x):
+        a = x[0::2]
+        b = x[1::2]
 
+        L = (a + b) / np.sqrt(2)
+        H = (a - b) / np.sqrt(2)
+
+        return np.concatenate((L, H))
+
+    def _inverse_haar(self, coefficients):
+        # split the coefficients into low and high components
+        split = len(coefficients) // 2
+        L = coefficients[:split]
+        H = coefficients[split:]
+
+        a = (L + H) / np.sqrt(2)
+        b = (L - H) / np.sqrt(2)
+
+        x = np.empty(len(coefficients), dtype=np.float64)
+        x[0::2] = a # even values
+        x[1::2] = b # odd values
+
+        return x
+
+    def _forward_haar_2d(self, img):
+        # generates a 2D haar matrix with LL, LH, HL, HH blocks
+        temp = np.apply_along_axis(
+            self._forward_haar, 
+            axis = 0, 
+            arr = img
+        )
+
+        return np.apply_along_axis(
+            self._forward_haar, 
+            axis = 1, 
+            arr = temp
+        )
+
+    def _inverse_haar_2d(self, coefficients):
+        temp = np.apply_along_axis(
+            self._inverse_haar, 
+            axis = 0, 
+            arr = coefficients
+        )
+
+        return np.apply_along_axis(
+            self._inverse_haar, 
+            axis = 1, 
+            arr = temp
+        )
+
+    def apply_W(self, x: np.ndarray, levels: int=3) -> np.ndarray:
+        """Applies inverse multi-stage haar transform to the vector of wavelet coefficients
+        
+        Args:
+            x (np.ndarray): Vector of wavelet coefficients
+            levels (int, optional): Number of stages for the haar transform. Defaults to 3.
+        
+        Returns:
+            np.ndarray: image after applying the inverse multi-stage haar transform
+        """
+        coefficients = self._reshape_img(x)
+
+        res = coefficients.copy()
+        h, w = res.shape
+
+        # go in reverse order to reconstuct image
+        for levels in range(levels-1, -1, -1):
+            x = h // (2**levels)
+            y = w // (2**levels)
+
+            res[:x, :y] = self._inverse_haar_2d(res[:x, :y])
+
+        return res
+
+    def apply_W_T(self, img: np.ndarray, levels: int=3) -> np.ndarray:
+        """Applies multi-stage haar transform to the image
+        
+        Args:
+            img (np.ndarray): flat image array
+            levels (int, optional): Number of stages for the haar transform. Defaults to 3.
+        
+        Returns:
+            np.ndarray: wavelet coefficients after applying the multi-stage haar transform
+        """
+        res = img.copy()
+        h, w = img.shape
+
+        for _ in range(levels):
+            res[:h, :w] = self._forward_haar_2d(res[:h, :w])
+
+            h //= 2
+            w //= 2
+
+        return res
+
+    def apply_R(self, img: np.ndarray, kernel_size: int=9, sigma: float=4.0) -> np.ndarray:
+        """Applies the blur to the image 
+        
+        Args:
+            img (np.ndarray): flat image array
+            kernel_size (int, optional): Size of the Gaussian kernel. Defaults to 9.
+            sigma (float, optional): Standard deviation of the Gaussian kernel. Defaults to 4.0.
+        
+        Returns:
+            np.ndarray: image after applying the blur operator R
+        """
+        return self.gaussian_blur(img, kernel_size=kernel_size, sigma=sigma)
+
+    def apply_A(self, x: np.ndarray, kernel_size: int=9, sigma: float=4.0, levels: int=3) -> np.ndarray:
+        """Applies the A = RW matrix to the flat image
+        
+        Args:
+            x (np.ndarray): flat image array
+            kernel_size (int, optional): Size of the Gaussian kernel. Defaults to 9.
+            sigma (float, optional): Standard deviation of the Gaussian kernel. Defaults to 4.0.
+            levels (int, optional): Number of stages for the haar transform. Defaults to 3.
+        
+        Returns:
+            np.ndarray: wavelet coefficients after applying the blur operator R and the multi-stage haar transform W
+        """
+        img = self.apply_W(x, levels=levels)
+        blur_img = self.apply_R(img, kernel_size=kernel_size, sigma=sigma)
+
+        return self._flatten_img(blur_img)
+
+    def apply_A_T(self, x: np.ndarray, kernel_size: int=9, sigma: float=4.0, levels: int=3) -> np.ndarray:
+        """Applies the A^T = W^T R^T matrix to the flat image
+        
+        Args:
+            x (np.ndarray): flat image array
+            kernel_size (int, optional): Size of the Gaussian kernel. Defaults to 9.
+            sigma (float, optional): Standard deviation of the Gaussian kernel. Defaults to 4.0.
+            levels (int, optional): Number of stages for the haar transform. Defaults to 3.
+        
+        Returns:
+            np.ndarray: wavelet coefficients after applying the transpose of the blur operator R and the multi-stage haar transform W
+        """
+        img = self.apply_R(x, kernel_size=kernel_size, sigma=sigma)
+        haar_img = self.apply_W_T(img, levels=levels)
+
+        return self._flatten_img(haar_img)
 
 # example usage
 if __name__ == "__main__":
@@ -129,4 +270,17 @@ if __name__ == "__main__":
     processor.save_img(blurred_img, "data/blurred_image.png")
     processor.save_img(noisy_img, "data/noisy_image.png")
 
+    # apply A matrix ie A = RW
+    A = processor.apply_A(flattened_img, kernel_size=9, sigma=4.0, levels=3)
 
+    # apply A^T matrix ie A^T = W^T R^T
+    AT = processor.apply_A_T(flattened_img, kernel_size=9, sigma=4.0, levels=3)
+
+    # apply W matrix ie inverse haar transform
+    W = processor.apply_W(flattened_img, levels=3)
+
+    # apply W^T matrix ie haar transform. NOTE input should be a 2d image
+    WT = processor.apply_W_T(processor._reshape_img(flattened_img), levels=3)
+
+    # apply R matrix and RT matrix are the same (gaussian blur)
+    R = processor.apply_R(flattened_img, kernel_size=9, sigma=4.0)
