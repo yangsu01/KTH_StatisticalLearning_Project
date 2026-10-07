@@ -27,9 +27,9 @@ HAAR_LEVELS = 3
 # the step-size variation: our experiment
 STEP_FACTORS = (
     0.5,
-    0.75,
     1.0,  # t = 1/L(f), the step every theorem in the paper assumes
     1.5,
+    2.0,
     2.5,  # past the classical bound t = 2/L(f), so both methods must break
 )
 STEP_ITERS = 100  # iterations per curve: enough to see which curves rise
