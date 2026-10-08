@@ -38,9 +38,9 @@ class ImageProcessor:
         """
         img = self._reshape_img(flat_img)
 
-        # gaussian kervel
+        # gaussian kernel
         kernel = self._gaussian_kernel(kernel_size, sigma)
-        kernel = kernel[::-1, ::-1] # flip kernel
+        kernel = kernel[::-1, ::-1] # flip kernel for convolution
 
         # pad image with reflective boundary conditions
         padded_img = np.pad(
@@ -75,7 +75,8 @@ class ImageProcessor:
             size = self.original_shape
         )
 
-        img = self._reshape_img(flat_img) + noise
+        img = self._reshape_img(flat_img) + noise # add noise to image
+        img = np.clip(img, 0, 1) # clip values to [0, 1]
 
         return self._flatten_img(img)
 
@@ -173,7 +174,7 @@ class ImageProcessor:
         """
         coefficients = self._reshape_img(x)
 
-        res = coefficients.copy()
+        res = np.zeros_like(coefficients, dtype=np.float64)
         h, w = res.shape
 
         # go in reverse order to reconstuct image
@@ -195,8 +196,8 @@ class ImageProcessor:
         Returns:
             np.ndarray: wavelet coefficients after applying the multi-stage haar transform
         """
-        res = img.copy()
-        h, w = img.shape
+        res = np.zeros_like(img, dtype=np.float64)
+        h, w = res.shape
 
         for _ in range(levels):
             res[:h, :w] = self._forward_haar_2d(res[:h, :w])
