@@ -173,8 +173,7 @@ class ImageProcessor:
             np.ndarray: image after applying the inverse multi-stage haar transform
         """
         coefficients = self._reshape_img(x)
-
-        res = np.zeros_like(coefficients, dtype=np.float64)
+        res = coefficients.copy()
         h, w = res.shape
 
         # go in reverse order to reconstuct image
@@ -196,7 +195,7 @@ class ImageProcessor:
         Returns:
             np.ndarray: wavelet coefficients after applying the multi-stage haar transform
         """
-        res = np.zeros_like(img, dtype=np.float64)
+        res = img.copy()
         h, w = res.shape
 
         for _ in range(levels):
